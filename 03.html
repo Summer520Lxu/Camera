@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 表情與面具掃描儀</title>
+    <script defer src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js"></script>
+    
+    <style>
+        :root {
+            --bg-color: #05080f;
+            --tech-green: #00ff41; /* 經典矩陣綠 */
+            --tech-blue: #00d2ff;
+            --text-color: #ffffff;
+            --panel-bg: rgba(10, 20, 30, 0.8);
+        }
+
+        body {
+            font-family: 'Courier New', Courier, monospace; /* 科技感字體 */
+            margin: 0; padding: 0;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            display: flex; flex-direction: column; align-items: center;
+            min-height: 100vh;
+        }
+
+        h2 {
+            margin-top: 20px;
+            letter-spacing: 3px;
+            color: var(--tech-green);
+            text-shadow: 0 0 10px rgba(0, 255, 65, 0.7);
+        }
+
+        .controls { margin: 15px 0; z-index: 10; }
+
+        #switchBtn {
+            padding: 10px 25px; font-size: 14px; cursor: pointer;
+            border-radius: 5px; border: 1px solid var(--tech-green);
+            background: transparent; color: var(--tech-green);
+            font-weight: bold; text-transform: uppercase;
+            transition: all 0.3s;
+        }
+
+        #switchBtn:hover {
+            background: var(--tech-green); color: var(--bg-color);
+            box-shadow: 0 0 15px var(--tech-green);
+        }
+
+        .camera-container {
+            position: relative; display: inline-block;
+            border: 1px solid var(--tech-blue);
+            box-shadow: 0 0 20px rgba(0, 210, 255, 0.2);
+            background: #000;
+        }
+
+        video { display: block; }
+        canvas { position: absolute; top: 0; left: 0; z-index: 5; }
+
+        /* 電影般的掃描線效果 */
+        .camera-container::after {
+            content: ""; position: absolute; top: 0; left: 0;
+            width: 100%; height: 2px;
+            background: var(--tech-green);
+            box-shadow: 0 0 10px var(--tech-green);
+            animation: scanLine 4s infinite linear;
+            z-index: 6; pointer-events: none;
+        }
+
+        @keyframes scanLine {
+            0% { top: 0%; }
+            50% { top: 100%; }
+            100% { top: 0%; }
+        }
+
+        #data-panel {
+            margin-top: 20px; padding: 15px; border-radius: 5px;
+            background-color: var(--panel-bg);
+            border: 1px solid rgba(0, 210, 255, 0.3);
+            backdrop-filter: blur(5px);
+            min-width: 320px; text-align: center;
+        }
+
+        #status { font-size: 1rem; color: var(--tech-blue); font-weight: bold; margin-bottom: 5px;}
+        #ai-details { font-size: 0.85rem; color: rgba(255, 255, 255, 0.7); }
+    </style>
+</head>
+<body>
+
+    <h2>BIO-DATA SCANNER v1.0</h2>
+    
+    <div class="controls">
+        <button id="switchBtn">切換核心模式</button>
+    </div>
+
+    <div class="camera-container" id="camera-container">
+        <video id="video" width="640" height="480" autoplay muted playsinline></video>
+    </div>
+
+    <div id="data-panel">
+        <div id="status">正在同步 AI 核心模型...</div>
+        <div id="ai-details">Initializing... 資料僅在本機處理，保障隱私。</div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const status = document.getElementById('status');
+        const details = document.getElementById('ai-details');
+        const switchBtn = document.getElementById('switchBtn');
+        let currentFacingMode = 'user'; 
+
+        // 1. 表情與 Emoji 的映射表 (你要求的表情大集合！)
+        const emojiMap = {
+            neutral:   '😐 平靜',
+            happy:     '😀 開心',
+            sad:       '😭 難過',
+            angry:     '😡 生氣',
+            fearful:   '😱 恐懼',
+            disgusted: '😖 厭惡',
+            surprised: '😮 驚訝'
+        };
+
+        // 2. 載入必要的 AI 模型
+        async function loadModels() {
+            // 從安全、公開的 CDN 載入 Google 訓練好的模型權重
+            const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
+            details.innerText = "Loading models from secure CDN...";
+            try {
+                await Promise.all([
+                    faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+                    faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL), // 這是畫臉部線條必需的
+                    faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL) // 這是辨識表情必需的
+                ]);
+                status.innerText = "系統核心：已就緒";
+                details.innerText = "等待鏡頭串流啟動...";
+                startVideo();
+            } catch (err) {
+                status.innerText = "❌ 核心載入失敗";
+                details.innerText = "請檢查網路連線或稍後再試。";
+                console.error(err);
+            }
+        }
+
+        // 3. 啟動鏡頭
+        async function startVideo() {
+            if (video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+            }
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: currentFacingMode }
+                });
+                video.srcObject = stream;
+            } catch (err) {
+                status.innerText = "❌ 鏡頭錯誤";
+                details.innerText = "無法存取鏡頭。請確保使用 HTTPS 或 localhost 存取。";
+            }
+        }
+
+        switchBtn.addEventListener('click', () => {
+            currentFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
+            const oldCanvas = document.querySelector('canvas');
+            if(oldCanvas) oldCanvas.remove();
+            startVideo();
+        });
+
+        // 4. 核心辨識邏輯：表情 Emoji + 臉部線條
+        video.addEventListener('play', () => {
+            const canvas = faceapi.createCanvasFromMedia(video);
+            document.getElementById('camera-container').append(canvas);
+            const displaySize = { width: video.width, height: video.height };
+            faceapi.matchDimensions(canvas, displaySize);
+            
+            status.innerText = "📡 正在即時掃描生物特徵...";
+
+            setInterval(async () => {
+                // 偵測人臉、特徵點(線條)、表情
+                const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
+                    .withFaceLandmarks()
+                    .withFaceExpressions();
+
+                const resizedDetections = faceapi.resizeResults(detections, displaySize);
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height); // 清除上一幀
+
+                // 👉 畫出臉部線條網格 (科技感面具)
+                faceapi.draw.drawFaceLandmarks(canvas, resizedDetections);
+
+                // 👉 處理表情 Emoji 顯示
+                resizedDetections.forEach(detection => {
+                    const expressions = detection.expressions;
+                    // 找出機率最高的情緒
+                    const topExpression = Object.entries(expressions).sort((a,b) => b[1] - a[1])[0][0];
+                    const emojiText = emojiMap[topExpression] || '🤔';
+
+                    // 取得人臉方框位置，把 Emoji 畫在正上方
+                    const box = detection.detection.box;
+                    
+                    // 自訂文字樣式 (超大 Emoji)
+                    ctx.font = '50px serif';
+                    ctx.fillStyle = '#ffffff';
+                    ctx.textAlign = 'center';
+                    // 畫在人臉框上方 10px 的位置
+                    ctx.fillText(emojiText, box.x + box.width / 2, box.y - 10); 
+                    
+                    // (可選) 畫一個淡淡的藍色框，看起來更像在被掃描
+                    ctx.strokeStyle = '#00d2ff';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(box.x, box.y, box.width, box.height);
+                });
+                
+                if (detections.length > 0) {
+                    details.innerText = `Subject(s) detected. Analyzing emotional data...`;
+                } else {
+                    details.innerText = "Awaiting target. Standby...";
+                }
+
+            }, 150); // 每 0.15 秒更新一次，保持流暢
+        });
+
+        // 初始化
+        loadModels();
+    </script>
+</body>
+</html>
