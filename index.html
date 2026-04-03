@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>瀏覽器 AI 辨識鏡頭</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet"></script>
+    <style>
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background: #f0f2f5; }
+        #video-container { position: relative; margin-top: 20px; }
+        video { border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
+        #status { margin-top: 15px; font-size: 1.2rem; color: #333; font-weight: bold; }
+        .loader { color: #666; }
+    </style>
+</head>
+<body>
+
+    <h2>AI 即時場景辨識</h2>
+    <div id="status" class="loader">模型載入中，請稍候...</div>
+    
+    <div id="video-container">
+        <video id="webcam" autoplay playsinline width="640" height="480"></video>
+    </div>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const status = document.getElementById('status');
+        let model;
+
+        // 1. 初始化鏡頭
+        async function setupWebcam() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = stream;
+                return new Promise((resolve) => {
+                    video.onloadedmetadata = () => resolve();
+                });
+            } catch (err) {
+                status.innerText = "無法開啟鏡頭，請檢查權限。";
+                console.error(err);
+            }
+        }
+
+        // 2. 載入模型並開始預測
+        async function run() {
+            // 載入輕量級的 MobileNet 模型
+            model = await mobilenet.load();
+            status.innerText = "模型載入成功！正在辨識...";
+
+            await setupWebcam();
+            predict();
+        }
+
+        // 3. 循環進行預測
+        async function predict() {
+            const predictions = await model.classify(video);
+            
+            // 取得最高機率的結果 (中文翻譯需自行對照，這裡顯示英文標籤)
+            if (predictions.length > 0) {
+                status.innerText = `辨識結果：${predictions[0].className} (${(predictions[0].probability * 100).toFixed(1)}%)`;
+            }
+
+            // 每一秒辨識一次，避免過度耗能（也可以改短一點）
+            requestAnimationFrame(predict);
+        }
+
+        run();
+    </script>
+</body>
+</html>
